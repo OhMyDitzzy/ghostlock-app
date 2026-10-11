@@ -9,13 +9,60 @@ import java.io.RandomAccessFile
 import java.util.concurrent.atomic.AtomicBoolean
 
 @Keep
-class GhostlockUserService(private val context: Context) : IGhostlockUserService.Stub() {
+class GhostlockUserService(private val context: Context?) : IGhostlockUserService.Stub() {
+    @Keep
+    constructor() : this(null)
+
+    init {
+        // Stamp written as early as possible so the timeout handler in
+        // ShizukuExploitRunner can distinguish "class never loaded" (no stamp ->
+        // classpath/SELinux failure on the server side) from "class loaded but
+        // binder not delivered" (stamp present -> OEM binder-delivery block).
+        runCatching {
+            val dir = File("/data/local/tmp/ghostlock-app")
+            if (dir.isDirectory || dir.mkdirs()) {
+                File(dir, ".svc_stamp").writeText(Process.myPid().toString())
+            }
+        }
+    }
+
     private val running = AtomicBoolean(false)
 
     private companion object {
         const val StatusMarker = "\u001eGLK_STATUS"
         const val StatusAck = "\u001eGLK_STATUS_ACK\n"
         const val StatusDisabled = "\u001eGLK_STATUS_DISABLED"
+
+        /**
+         * Locates libghostlock.so.
+         *
+         * Primary path: ApplicationInfo.nativeLibraryDir — reliable when Shizuku
+         * delivers a valid Context.
+         *
+         * Fallback path: /proc/self/maps — works even with a null Context because
+         * the Shizuku server has already mapped the library into the service process
+         * before calling the constructor.  Parses the first line that contains
+         * "libghostlock.so" and extracts the absolute path after the last space.
+         */
+        fun findBinary(context: Context?): File {
+            if (context != null) {
+                val f = File(context.applicationInfo.nativeLibraryDir, "libghostlock.so")
+                if (f.isFile) return f
+            }
+            val maps = runCatching { File("/proc/self/maps").readText() }.getOrNull() ?: ""
+            for (line in maps.lineSequence()) {
+                if (!line.contains("libghostlock.so")) continue
+                val path = line.trimEnd().substringAfterLast(' ')
+                if (path.startsWith('/')) {
+                    val f = File(path)
+                    if (f.isFile) return f
+                }
+            }
+            // Last resort: return the context-derived path anyway so the existing
+            // error message ("missing GhostLock binary: …") fires with a useful path.
+            val fallbackDir = context?.applicationInfo?.nativeLibraryDir ?: "/system/lib64"
+            return File(fallbackDir, "libghostlock.so")
+        }
     }
 
     override fun runExploit(
@@ -51,7 +98,7 @@ class GhostlockUserService(private val context: Context) : IGhostlockUserService
                     callback.onLog("<s> kernel does not require Shizuku; running on user request")
                 }
 
-                val binary = File(context.applicationInfo.nativeLibraryDir, "libghostlock.so")
+                val binary = findBinary(context)
                 require(binary.isFile) { "missing GhostLock binary: ${binary.absolutePath}" }
 
                 val workDir = File("/data/local/tmp/ghostlock-app").apply {
