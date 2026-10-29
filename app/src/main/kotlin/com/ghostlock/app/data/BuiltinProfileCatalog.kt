@@ -116,7 +116,7 @@ internal class BuiltinProfileCatalog(context: Context) {
     /** Extract a string value from the bootconfig block. */
     private fun getBootconfigString(profile: ValueMap, key: String): String? {
         val bootconfig = profile["bootconfig"] as? ValueMap ?: return null
-        (bootconfig[key] as? String)?.takeIf { it.isNotBlank() }
+        return (bootconfig[key] as? String)?.takeIf { it.isNotBlank() }
     }
 
     private fun readAsset(path: String): String? =
