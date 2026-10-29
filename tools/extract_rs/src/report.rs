@@ -512,6 +512,8 @@ mod tests {
             route_geometry: &geometry,
             cred: &conf_cred_6x(),
             extra_offsets: &no_extra_offsets(),
+            bootconfig_hardware: None,
+            bootconfig_product_device: None,
         });
         assert!(!out.contains("include"));
         assert!(out.contains("kernel_phys_load = 1073741824"));
@@ -543,6 +545,8 @@ mod tests {
             route_geometry: &geometry,
             cred: &conf_cred_6x(),
             extra_offsets: &no_extra_offsets(),
+            bootconfig_hardware: None,
+            bootconfig_product_device: None,
         });
         assert!(out.contains("tcp_zerocopy {\n    compact_waiter = 1"));
         assert!(out.contains("mm_struct_sz = 1024"));
@@ -581,6 +585,8 @@ mod tests {
             extra_offsets: &ConfExtraOffsets {
                 empty_zero_page: Some(47_529_984),
             },
+            bootconfig_hardware: None,
+            bootconfig_product_device: None,
         });
         assert!(out.contains("multicast_waiter {\n    waiter_off = 96"));
         assert!(out.contains("buffer_size = 264"));
@@ -711,6 +717,8 @@ mod tests {
             extra_offsets: &ConfExtraOffsets {
                 empty_zero_page: None,
             },
+            bootconfig_hardware: None,
+            bootconfig_product_device: None,
         });
         assert!(out.contains("route {"));
         assert!(out.contains("multicast_waiter {"));
@@ -730,6 +738,8 @@ mod tests {
             route_geometry: &[],
             cred: &[],
             extra_offsets: &no_extra_offsets(),
+            bootconfig_hardware: None,
+            bootconfig_product_device: None,
         });
         assert!(out.contains("kernelsnitch {"));
         assert!(out.contains("collisions = null"));
@@ -755,6 +765,8 @@ mod tests {
             route_geometry: &geometry,
             cred: &[],
             extra_offsets: &no_extra_offsets(),
+            bootconfig_hardware: None,
+            bootconfig_product_device: None,
         });
         assert!(out.contains("multicast_waiter {\n    waiter_off = 96"));
         assert!(out.contains("buffer_size = 264"));
@@ -916,6 +928,8 @@ mod tests {
             route_geometry: &geometry,
             cred: &cred,
             extra_offsets: &extra,
+            bootconfig_hardware: None,
+            bootconfig_product_device: None,
         });
         let bundled = std::fs::read_to_string(concat!(
             env!("CARGO_MANIFEST_DIR"),
