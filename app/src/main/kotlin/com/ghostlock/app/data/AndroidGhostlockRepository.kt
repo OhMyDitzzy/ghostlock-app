@@ -799,6 +799,7 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
                 filesDir = filesDir,
                 userProfiles = userProfileStore,
                 preferences = sessionPreferences,
+                builtinCatalog = builtinProfiles,
                 forcedUserProfile = name,
                 forcedBuiltinRelease = profileController.activeBuiltinRelease(),
             )
