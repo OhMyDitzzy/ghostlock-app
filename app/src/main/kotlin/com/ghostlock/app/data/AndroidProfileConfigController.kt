@@ -2,6 +2,7 @@ package com.ghostlock.app.data
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.os.Build
 import androidx.core.content.edit
 import androidx.core.net.toUri
 import com.ghostlock.app.data.profile.CpuPairView
