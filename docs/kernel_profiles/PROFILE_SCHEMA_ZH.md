@@ -83,6 +83,7 @@ offset { init_task = 34464384, init_cred = 34538824 }
 | `kernel_major` | int | `5` 或 `6`；用于地址解析与合法性检查，不决定路由 |
 | `route` | object | 显式路由父项，只含一个分支，见第 3 节 |
 | `fallback` | object | 回退声明（`to` + 可选 `route` 分支），见第 3 节 |
+| `bootconfig` | object | 可选。多设备共用同一内核版本时的硬件标识消歧。包含 `hardware`（匹配 `Build.HARDWARE` / `androidboot.hardware`）和 `product_device`（匹配 `Build.DEVICE` / `androidboot.product.device`）。详见 [README_ZH.md](README_ZH.md#bootconfig-based-disambiguation)。 |
 | 几何字段 | object/int | 按命名空间分组：`task_struct` / `cred` / `offset` / `kernelsnitch`。当前路由的全字段与公共几何必须全部出现；无法提供的值写显式 `null`（不要用 `0` 占位）；非当前路由的分支省略，声明的 fallback 除外 |
 | `execution` | object | 调优参数（advisory）。通用项来自 `execution-tuning.conf`，路由项来自 `execution-<route>.conf`；两者由 resolver 作为 preset 加载，设备 profile 不 include。只写差异 |
 

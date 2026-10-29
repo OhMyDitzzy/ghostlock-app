@@ -3,7 +3,11 @@
 > 中文: [README_ZH.md](README_ZH.md)
 
 GhostLock matches kernels by exact `uname -r`. When nothing matches, the app
-refuses to run. Supporting a new kernel usually needs no code change, only a
+refuses to run. When multiple devices share the same kernel version (common with
+Android Common Kernel), the app further disambiguates using bootconfig
+parameters `androidboot.hardware` and `androidboot.product.device` extracted
+from `boot.img`. These are compared against `Build.HARDWARE` and `Build.DEVICE`
+at runtime. Supporting a new kernel usually needs no code change, only a
 profile (a HOCON config file) for that kernel.
 
 Only kernel geometry (symbol and struct offsets) is required.
@@ -22,8 +26,12 @@ suggestions: a profile may omit them and the shipped default applies. See
 Built-in profiles live in `app/src/main/assets/kernel_profiles/`:
 
 - `index.conf`: the list of built-in kernels. New profiles must be added here.
-- `<uname-r>.conf`: one complete profile per kernel. The `release` entry in
-  `index.conf` must match `uname -r` exactly, and the file is named after it.
+- `<uname-r>_<hardware>_<product-device>.conf`: one complete profile per kernel
+  variant. The `release` entry in `index.conf` must match `uname -r` exactly.
+  When multiple profiles share the same release, the file name encodes the
+  hardware (`androidboot.hardware`, e.g. `qcom`, `mtk`, `exynos`) and product
+  device (`androidboot.product.device`, e.g. `sakura`, `veux`, `fog`) for
+  disambiguation. The app picks the best match at runtime.
 - `execution-tuning.conf`: tuning shared by every kernel.
 - `execution-<route>.conf`: tuning for one attack route. The resolver loads
   these presets; device profiles don't `include` them.
@@ -40,11 +48,46 @@ nestable). JSON is valid HOCON, so nothing needs converting.
 Field meanings, the required-field matrix, and validation rules are in the
 [Profile schema](PROFILE_SCHEMA.md).
 
+## Bootconfig-based disambiguation
+
+When the extractor runs on a `boot.img` with a v3/v4 header that includes a
+bootconfig section, it parses `androidboot.hardware` and
+`androidboot.product.device` and embeds them in the generated profile under a
+`bootconfig` block:
+
+```hocon
+bootconfig {
+  hardware = "qcom"
+  product_device = "sakura"
+}
+```
+
+At runtime, the app reads `Build.HARDWARE` and `Build.DEVICE` and compares them
+against the profile's `bootconfig.hardware` and `bootconfig.product_device`.
+
+- If the profile has no bootconfig block, it matches any device with that
+  kernel release (legacy behavior).
+- If the profile has bootconfig and the device values match exactly, the
+  profile is selected.
+- If the profile has bootconfig but the device values don't match, the profile
+  is skipped and the app looks for another profile for the same release.
+- If no profile matches the device's bootconfig, the kernel is treated as
+  unsupported.
+
+This allows multiple device-specific profiles for the same kernel release
+(e.g. `6.6.118-android15-8-..._qcom_sakura.conf` and
+`6.6.118-android15-8-..._mtk_veux.conf`).
+
 ## Port a kernel
 
 1. **Identify the kernel version.**
    Run `adb shell uname -r` and keep the complete string. Any character
    difference makes matching fail.
+
+2. **Identify the hardware and product device (optional but recommended).**
+   Run `adb shell getprop ro.hardware` and `adb shell getprop ro.product.device`
+   (or check `Build.HARDWARE` / `Build.DEVICE` in code). These correspond to
+   `androidboot.hardware` and `androidboot.product.device` in the bootconfig.
 
 2. **Pick a template.**
    Open the document for the kernel family:
@@ -54,15 +97,21 @@ Field meanings, the required-field matrix, and validation rules are in the
    [6.12](templates/kernel-6.12.template.md).
 
 3. **Copy it into a new profile.**
-   Copy the template to `app/src/main/assets/kernel_profiles/<uname-r>.conf`.
-   The file name must match `release`, then fill in the required fields.
+   Copy the template to `app/src/main/assets/kernel_profiles/<uname-r>_<hardware>_<product-device>.conf`.
+   The file name must match `release` plus the hardware and product device, then fill in the required fields.
+   If bootconfig is not available, the old naming `<uname-r>.conf` still works.
 
 4. **Extract the offsets.**
 
    ```sh
    (cd tools/extract_rs && cargo build --release)
-   build/extract/release/ghostlock-extract boot.img --format conf --out profile.conf
+   build/extract/release/ghostlock-extract boot.img --format conf
    ```
+
+   The extractor now writes the profile to a file named automatically using the
+   new convention: `<release>_<hardware>_<product-device>.conf` (e.g.
+   `6.6.118-android15-8-..._qcom_sakura.conf`). If bootconfig is unavailable,
+   it falls back to `<release>.conf`. Use `--out` to override the output path.
 
    `--format conf` writes a flattened, self-contained profile with no
    `include` lines and the 6.x credential/KernelSnitch constants inlined. It

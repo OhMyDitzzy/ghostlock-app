@@ -22,6 +22,9 @@ data class CoreProfile(
     val kernelsnitchCollisions: UInt,
     val mmStructSz: UInt,
     val recommendations: SparseExecutionValues,
+    // Bootconfig parameters for device disambiguation (androidboot.hardware, androidboot.product.device)
+    val bootconfigHardware: String?,
+    val bootconfigProductDevice: String?,
 )
 
 /** Typed, path-carrying configuration error. */

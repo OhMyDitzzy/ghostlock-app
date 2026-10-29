@@ -85,6 +85,7 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
         filesDir,
         userProfileStore,
         preferences,
+        builtinProfiles,
     )
     private val cpuPairs = mutableListOf<CpuPair>()
     private val cpuPairLabels = mutableListOf<String>()

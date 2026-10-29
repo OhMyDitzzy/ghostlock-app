@@ -20,6 +20,34 @@ pub const MTK_DEFAULT_PHYS_LOAD: u64 = 0x8000_0000;
 pub const QC_PHYS_LOAD_6_6: u64 = 0xA800_0000;
 pub const QC_PHYS_LOAD_6_12: u64 = 0xC780_0000;
 
+/// Bootconfig parameters extracted from Android boot image v3/v4.
+#[derive(Debug, Clone, Default)]
+pub struct BootConfig {
+    /// androidboot.hardware value (e.g., "qcom", "mtk", "exynos")
+    pub hardware: Option<String>,
+    /// androidboot.product.device value (e.g., "sakura", "veux", "fog")
+    pub product_device: Option<String>,
+}
+
+impl BootConfig {
+    /// Parse bootconfig data (simple key=value\n format).
+    fn parse(data: &[u8]) -> BootConfig {
+        let mut config = BootConfig::default();
+        if let Ok(text) = std::str::from_utf8(data) {
+            for line in text.lines() {
+                if let Some((key, value)) = line.split_once('=') {
+                    match key {
+                        "androidboot.hardware" => config.hardware = Some(value.to_string()),
+                        "androidboot.product.device" => config.product_device = Some(value.to_string()),
+                        _ => {}
+                    }
+                }
+            }
+        }
+        config
+    }
+}
+
 /// MTK boot kernels are stored as LZ4 legacy frames: a 4-byte magic followed
 /// by size-prefixed blocks, ending once a block decompresses under 8 MiB.
 pub fn decompress_lz4_legacy(payload: &[u8]) -> Result<Vec<u8>> {
@@ -205,6 +233,7 @@ pub struct BootImage {
     pub kernel: Vec<u8>,
     pub mtk_lz4: bool,
     pub mtk_gzip: bool,
+    pub bootconfig: Option<BootConfig>,
 }
 
 impl BootImage {
@@ -225,6 +254,7 @@ impl BootImage {
             kernel: raw,
             mtk_lz4: false,
             mtk_gzip: false,
+            bootconfig: None,
         })
     }
 
@@ -233,25 +263,56 @@ impl BootImage {
             return Err(ExtractError::new("truncated Android boot header"));
         }
         let kernel_size = u32::from_le_bytes(raw[8..12].try_into().unwrap()) as usize;
+        let ramdisk_size = u32::from_le_bytes(raw[16..20].try_into().unwrap()) as usize;
         let header_size = u32::from_le_bytes(raw[20..24].try_into().unwrap()) as usize;
+        let page_size = u32::from_le_bytes(raw[36..40].try_into().unwrap()) as usize;
         let version = u32::from_le_bytes(raw[40..44].try_into().unwrap());
         if !(version == 3 || version == 4) {
             return Err(ExtractError::new(format!(
                 "unsupported boot header version {version}"
             )));
         }
-        let start = align(header_size, PAGE_SIZE);
+
+        // Parse dtb_size and bootconfig_size (v3/v4)
+        let dtb_size = if raw.len() >= 1648 {
+            u32::from_le_bytes(raw[1644..1648].try_into().unwrap()) as usize
+        } else {
+            0
+        };
+        let bootconfig_size = if version == 4 && raw.len() >= 1660 {
+            u32::from_le_bytes(raw[1656..1660].try_into().unwrap()) as usize
+        } else {
+            0
+        };
+
+        let start = align(header_size, page_size);
         let end = start + kernel_size;
         if end > raw.len() {
             return Err(ExtractError::new("kernel payload exceeds boot image"));
         }
         let kernel = &raw[start..end];
+
+        // Calculate bootconfig offset: header + kernel + ramdisk + dtb (each page-aligned)
+        let mut offset = align(header_size, page_size);
+        offset += align(kernel_size, page_size);
+        offset += align(ramdisk_size, page_size);
+        offset += align(dtb_size, page_size);
+
+        // Extract bootconfig if present
+        let bootconfig = if bootconfig_size > 0 && offset + bootconfig_size <= raw.len() {
+            let data = &raw[offset..offset + bootconfig_size];
+            Some(BootConfig::parse(data))
+        } else {
+            None
+        };
+
         if kernel.len() >= 4 && &kernel[..4] == LZ4_LEGACY_MAGIC {
             let kernel = decompress_lz4_legacy(kernel)?;
             return Ok(BootImage {
                 kernel,
                 mtk_lz4: true,
                 mtk_gzip: false,
+                bootconfig,
             });
         }
         if kernel.len() >= 3 && kernel[0] == 0x1f && kernel[1] == 0x8b && kernel[2] == 0x08 {
@@ -260,12 +321,14 @@ impl BootImage {
                 kernel,
                 mtk_lz4: false,
                 mtk_gzip: true,
+                bootconfig,
             });
         }
         Ok(BootImage {
             kernel: kernel.to_vec(),
             mtk_lz4: false,
             mtk_gzip: false,
+            bootconfig,
         })
     }
 

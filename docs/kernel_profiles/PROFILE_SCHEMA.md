@@ -95,6 +95,7 @@ offset { init_task = 34464384, init_cred = 34538824 }
 | `kernel_major` | int | `5` or `6`; used for address resolution and sanity checks, not route selection |
 | `route` | object | Explicit route parent with exactly one branch; see section 3 |
 | `fallback` | object | Fallback declaration (`to` plus an optional `route` branch); see section 3 |
+| `bootconfig` | object | Optional. Hardware disambiguation when multiple devices share the same kernel release. Contains `hardware` (matches `Build.HARDWARE` / `androidboot.hardware`) and `product_device` (matches `Build.DEVICE` / `androidboot.product.device`). See [README.md](README.md#bootconfig-based-disambiguation). |
 | geometry | object/int | Grouped by namespace: `task_struct` / `cred` / `offset` / `kernelsnitch`. Include every field of the active route and the shared geometry; use explicit `null` for unavailable values, never `0` as a placeholder. Omit unused route branches except a declared fallback |
 | `execution` | object | Advisory tuning. General values come from `execution-tuning.conf`, per-route values from `execution-<route>.conf`; the resolver loads both as presets, device profiles don't `include` them. Write only differences |
 

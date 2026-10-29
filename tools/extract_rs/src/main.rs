@@ -726,6 +726,9 @@ fn run(cli: &Cli) -> Result<i32> {
             empty_zero_page: kallsyms::unique(&symbols, "empty_zero_page")
                 .and_then(|value| value.checked_sub(base)),
         };
+        // Extract bootconfig from the boot image if available
+        let bootconfig_hardware = boot.bootconfig.as_ref().and_then(|bc| bc.hardware.as_deref());
+        let bootconfig_product_device = boot.bootconfig.as_ref().and_then(|bc| bc.product_device.as_deref());
         report::render_conf(&report::ConfInputs {
             release: release_text,
             phys: kernel_phys_load,
@@ -738,6 +741,8 @@ fn run(cli: &Cli) -> Result<i32> {
             route_geometry: &geometry,
             cred: &cred,
             extra_offsets: &extra_offsets,
+            bootconfig_hardware,
+            bootconfig_product_device,
         })
     } else {
         let report_value = report::build_report(
@@ -751,8 +756,49 @@ fn run(cli: &Cli) -> Result<i32> {
         );
         serde_json::to_string_pretty(&report_value).unwrap() + "\n"
     };
-    if let Some(out) = &cli.out {
+    /// Sanitize a string for use in a filename: keep alphanumeric, replace others with '_'.
+    fn sanitize_filename(s: &str) -> String {
+        s.chars()
+            .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+            .collect()
+    }
+
+    /// Generate the default output filename: <release>_<hardware>_<product_device>.conf
+    fn default_conf_filename(
+        release: &str,
+        hardware: Option<&str>,
+        product_device: Option<&str>,
+    ) -> String {
+        let hw = hardware.map(sanitize_filename).unwrap_or_else(|| "unknown".to_string());
+        let dev = product_device.map(sanitize_filename).unwrap_or_else(|| "unknown".to_string());
+        format!("{}_{}_{}.conf", release, hw, dev)
+    }
+
+    // Determine output path: use --out if provided, otherwise generate default filename for conf format
+    let output_path = if let Some(out) = &cli.out {
+        out.clone()
+    } else if cli.format == "conf" {
+        if let Some(release_text) = release.as_deref() {
+            let hw = boot.bootconfig.as_ref().and_then(|bc| bc.hardware.as_deref());
+            let dev = boot.bootconfig.as_ref().and_then(|bc| bc.product_device.as_deref());
+            let filename = default_conf_filename(release_text, hw, dev);
+            std::env::current_dir().unwrap_or_default().join(filename)
+        } else {
+            std::env::current_dir().unwrap_or_default().join("profile.conf")
+        }
+    } else {
+        // For non-conf formats, print to stdout
+        std::path::PathBuf::new()
+    };
+
+    if cli.format == "conf" && output_path.as_os_str().is_empty() {
+        // This shouldn't happen, but just in case
+        print!("{output}");
+    } else if let Some(out) = &cli.out {
         std::fs::write(out, output).map_err(|err| ExtractError::new(format!("{err}")))?;
+    } else if cli.format == "conf" {
+        std::fs::write(&output_path, output).map_err(|err| ExtractError::new(format!("{err}")))?;
+        eprintln!("info: profile written to {}", output_path.display());
     } else {
         print!("{output}");
     }

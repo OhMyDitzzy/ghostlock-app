@@ -2,7 +2,10 @@
 
 > English: [README.md](README.md)
 
-GhostLock 用 `uname -r` 精确匹配内核版本。匹配不到时应用会拒绝运行。支持一款
+GhostLock 用 `uname -r` 精确匹配内核版本。匹配不到时应用会拒绝运行。当多个设备
+共享同一内核版本（Android Common Kernel 常见）时，应用会进一步用从 `boot.img`
+提取的 bootconfig 参数 `androidboot.hardware` 和 `androidboot.product.device`
+进行消歧，运行时与 `Build.HARDWARE` 和 `Build.DEVICE` 比对。支持一款
 新内核通常不用改代码，只要补一份 profile（HOCON 配置）。
 
 只有内核几何（符号与结构体偏移）是必填项。`recommend_shizuku` 和 `execution`
@@ -20,8 +23,11 @@ GhostLock 用 `uname -r` 精确匹配内核版本。匹配不到时应用会拒�
 内置配置都在 `app/src/main/assets/kernel_profiles/`：
 
 - `index.conf`：内置内核清单。新 profile 必须登记到这里。
-- `<uname-r>.conf`：一款内核一份完整 profile。`index.conf` 中的 `release` 必须与
-  `uname -r` 完全一致，文件名沿用该字符串。
+- `<uname-r>_<hardware>_<product-device>.conf`：每个内核变体一份完整 profile。
+  `index.conf` 中的 `release` 必须与 `uname -r` 完全一致。当多个 profile 共享同一
+  release 时，文件名编码 hardware（`androidboot.hardware`，如 `qcom`、`mtk`、`exynos`）
+  和 product device（`androidboot.product.device`，如 `sakura`、`veux`、`fog`）
+  用于消歧。运行时 App 会选择最佳匹配。
 - `execution-tuning.conf`：所有内核共用的调优值。
 - `execution-<route>.conf`：各攻击路线（route）专属的调优值。这些 preset 由
   resolver 加载，设备 profile 不 include。
@@ -36,28 +42,65 @@ GhostLock 用 `uname -r` 精确匹配内核版本。匹配不到时应用会拒�
 
 字段含义、必填矩阵与校验规则见 [Profile 结构文档](PROFILE_SCHEMA_ZH.md)。
 
+## Bootconfig 消歧机制
+
+当提取器处理带有 v3/v4 头部且包含 bootconfig 节区的 `boot.img` 时，它会解析
+`androidboot.hardware` 和 `androidboot.product_device`，并把它们嵌入生成的 profile
+的 `bootconfig` 块中：
+
+```hocon
+bootconfig {
+  hardware = "qcom"
+  product_device = "sakura"
+}
+```
+
+运行时，App 读取 `Build.HARDWARE` 和 `Build.DEVICE`，并与 profile 的
+`bootconfig.hardware` 和 `bootconfig.product_device` 比对。
+
+- 如果 profile 没有 bootconfig 块，它匹配该内核 release 下的任意设备（旧行为）。
+- 如果 profile 有 bootconfig 且设备值完全匹配，选中该 profile。
+- 如果 profile 有 bootconfig 但设备值不匹配，跳过该 profile，在同一 release 下
+  寻找其他 profile。
+- 如果没有任何 profile 匹配设备的 bootconfig，该内核视为不支持。
+
+这样就可以为同一内核 release 编写多个设备专用 profile（如
+`6.6.118-android15-8-..._qcom_sakura.conf` 和
+`6.6.118-android15-8-..._mtk_veux.conf`）。
+
 ## 适配一款内核
 
 1. **确定内核版本。**
    运行 `adb shell uname -r`，把输出完整记下来。任何字符差异都会导致匹配失败。
 
-2. **选择模板。**
+2. **确定 hardware 和 product device（可选但推荐）。**
+   运行 `adb shell getprop ro.hardware` 和 `adb shell getprop ro.product.device`
+   （或在代码中查看 `Build.HARDWARE` / `Build.DEVICE`）。它们对应 bootconfig 里的
+   `androidboot.hardware` 和 `androidboot.product.device`。
+
+3. **选择模板。**
    按大版本打开对应文档：
    [5.x](templates/kernel-5.x.template_ZH.md)、
    [6.1](templates/kernel-6.1.template_ZH.md)、
    [6.6](templates/kernel-6.6.template_ZH.md)、
    [6.12](templates/kernel-6.12.template_ZH.md)。
 
-3. **复制成新的 profile。**
-   把模板复制到 `app/src/main/assets/kernel_profiles/<uname-r>.conf`，
-   文件名与 `release` 必须一致，然后填入必填字段。
+4. **复制成新的 profile。**
+   把模板复制到 `app/src/main/assets/kernel_profiles/<uname-r>_<hardware>_<product-device>.conf`，
+   文件名必须包含 release 加上 hardware 与 product device，然后填入必填字段。
+   如果无法获取 bootconfig，旧命名 `<uname-r>.conf` 仍然有效。
 
-4. **提取偏移。**
+5. **提取偏移。**
 
    ```sh
    (cd tools/extract_rs && cargo build --release)
-   build/extract/release/ghostlock-extract boot.img --format conf --out profile.conf
+   build/extract/release/ghostlock-extract boot.img --format conf
    ```
+
+   提取器现在会使用新命名约定自动写入文件：
+   `<release>_<hardware>_<product-device>.conf`
+   （如 `6.6.118-android15-8-..._qcom_sakura.conf`）。如果 bootconfig 不可用，
+   则退回到 `<release>.conf`。用 `--out` 可覆盖输出路径。
 
    `--format conf` 输出 flatten（无 `include`、6.x 凭据/KernelSnitch 常量内联）的
    自包含 profile：写出所选路由的全部字段与公共几何，无法取得的值写显式 `null`，

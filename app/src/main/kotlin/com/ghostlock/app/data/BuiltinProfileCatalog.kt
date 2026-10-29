@@ -14,6 +14,11 @@ internal class BuiltinProfileCatalog(context: Context) {
         val release: String,
         val recommendShizuku: Boolean,
         val fields: Map<String, Long>,
+        // Bootconfig fields for device disambiguation when multiple profiles share the same release
+        val bootconfigHardware: String?,
+        val bootconfigProductDevice: String?,
+        // Parsed profile document for direct use
+        val document: ValueMap,
     )
 
     private val entries: List<Entry> by lazy { loadEntries() }
@@ -31,7 +36,7 @@ internal class BuiltinProfileCatalog(context: Context) {
     }
 
     val builtin: Map<String, Map<String, Long>> by lazy {
-        entries.associate { it.release to it.fields }
+        entries.associateBy({ it.release }, { it.fields })
     }
 
     private fun loadEntries(): List<Entry> = runCatching {
@@ -46,9 +51,73 @@ internal class BuiltinProfileCatalog(context: Context) {
             val profile = readAsset("$BuiltinDirectory/$file")
                 ?.let { HoconSupport.parseValue(it).asValueMap() } ?: return@mapNotNull null
             val fields = flatten(profile)
-            Entry(release, recommendShizuku = fields["recommend_shizuku"] == 1L, fields = fields)
+            val bootconfigHardware = getBootconfigString(profile, "hardware")
+            val bootconfigProductDevice = getBootconfigString(profile, "product_device")
+            Entry(
+                release,
+                recommendShizuku = fields["recommend_shizuku"] == 1L,
+                fields = fields,
+                bootconfigHardware = bootconfigHardware,
+                bootconfigProductDevice = bootconfigProductDevice,
+                document = profile,
+            )
         }
     }.getOrDefault(emptyList())
+
+    /**
+     * Get the best matching profile for a given kernel release and device bootconfig.
+     * If multiple profiles exist for the same release, disambiguate by bootconfig.hardware
+     * and bootconfig.product_device. If no bootconfig match, return the first profile.
+     * If bootconfig is provided but no profile matches, return null (unsupported).
+     */
+    fun getBestMatchingProfile(
+        release: String,
+        hardware: String?,
+        productDevice: String?,
+    ): ValueMap? {
+        val candidates = entries.filter { it.release == release && !isTemplate(it.release) }
+        if (candidates.isEmpty()) return null
+
+        // If only one candidate, return it
+        if (candidates.size == 1) return candidates.first().document
+
+        // If device bootconfig is provided, try to match
+        if (hardware != null || productDevice != null) {
+            // Exact match on both hardware and product_device
+            val exactMatch = candidates.firstOrNull { entry ->
+                (hardware == null || entry.bootconfigHardware == hardware) &&
+                (productDevice == null || entry.bootconfigProductDevice == productDevice)
+            }
+            if (exactMatch != null) return exactMatch.document
+
+            // Partial match: hardware only
+            val hardwareMatch = candidates.firstOrNull { entry ->
+                entry.bootconfigHardware == hardware
+            }
+            if (hardwareMatch != null) return hardwareMatch.document
+
+            // No match with provided bootconfig - device not supported by any profile for this release
+            return null
+        }
+
+        // No bootconfig provided - return first profile (legacy behavior)
+        return candidates.first().document
+    }
+
+    /**
+     * Get all profiles for a given release (excluding templates).
+     * Useful for debugging or listing available variants.
+     */
+    fun getAllProfilesForRelease(release: String): List<ValueMap> {
+        return entries.filter { it.release == release && !isTemplate(it.release) }
+            .map { it.document }
+    }
+
+    /** Extract a string value from the bootconfig block. */
+    private fun getBootconfigString(profile: ValueMap, key: String): String? {
+        val bootconfig = profile["bootconfig"] as? ValueMap ?: return null
+        (bootconfig[key] as? String)?.takeIf { it.isNotBlank() }
+    }
 
     private fun readAsset(path: String): String? =
         assetLoader.load(path).takeIf { it.isNotBlank() }

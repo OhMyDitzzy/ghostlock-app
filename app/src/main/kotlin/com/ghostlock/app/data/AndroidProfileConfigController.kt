@@ -32,6 +32,7 @@ internal class AndroidProfileConfigController(
     private val filesDir: File,
     private val userProfiles: UserProfileStore,
     private val preferences: SharedPreferences,
+    private val builtinCatalog: BuiltinProfileCatalog,
     /**
      * Editing sessions pin the imported document instead of consulting the
      * live selection, and keep their overrides in [preferences] (a private
@@ -537,27 +538,43 @@ internal class AndroidProfileConfigController(
         overrides: ValueMap?,
         includeImported: Boolean,
     ): ValueMap? = runCatching {
-        val index = readIndex() ?: return@runCatching null
-        require((index["schema_version"] as? Number)?.toInt() == 1) { "unsupported profile schema" }
-        val builtinEntry = findProfile(index["profiles"].asValueList(), profileRelease)
         val imported = if (includeImported) {
             userProfiles.loadEntry(deviceRelease, activeUserProfile())
         } else {
             null
         }
         LegacyProfileConverter.convertValue(overrides)
-        if (builtinEntry == null && imported == null) return@runCatching null
-        val builtin = builtinEntry?.let { entry ->
-            val path = (entry["file"] as? String).orEmpty()
-            (HoconSupport.parseValue(readAsset("$BuiltinDirectory/$path")).asValueMap()
-                ?: error("profile is not an object"))
-                .also {
-                    require((it["schema_version"] as? Number)?.toInt() == 1) { "unsupported profile schema" }
-                    require(it["release"] == entry["release"]) {
-                        "profile index release mismatch"
-                    }
+
+        // Get the best matching profile using bootconfig disambiguation
+        // Use Build.HARDWARE and Build.DEVICE for device identification
+        val deviceHardware = Build.HARDWARE.takeIf { it.isNotBlank() }
+        val deviceProductDevice = Build.DEVICE.takeIf { it.isNotBlank() }
+        val builtin = builtinCatalog.getBestMatchingProfile(
+            profileRelease,
+            deviceHardware,
+            deviceProductDevice,
+        )
+
+        if (builtin == null && imported == null) return@runCatching null
+
+        if (builtin != null) {
+            // Validate bootconfig match if profile has bootconfig
+            val profileBootconfig = builtin["bootconfig"] as? Map<*, *>
+            val profileHardware = profileBootconfig?.get("hardware") as? String
+            val profileProductDevice = profileBootconfig?.get("product_device") as? String
+
+            // If profile has bootconfig but device doesn't match, it's an invalid profile for this device
+            if (profileHardware != null || profileProductDevice != null) {
+                val hardwareMatch = profileHardware == null || profileHardware == deviceHardware
+                val productDeviceMatch = profileProductDevice == null || profileProductDevice == deviceProductDevice
+
+                if (!hardwareMatch || !productDeviceMatch) {
+                    // Profile has bootconfig but doesn't match device - treat as no profile
+                    return@runCatching null
                 }
+            }
         }
+
         val tuningExecution = readExecutionTuning()?.get("execution").asValueMap()
         val routePresets = ProfileConfig.Routes
             .mapNotNull { route -> readExecutionRoute(route)?.let { route to it } }

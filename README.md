@@ -10,7 +10,7 @@ GhostLock uses CVE-2026-43499 to gain temporary root on supported Android kernel
 2. Install the GhostLock APK and open it.
 3. Check that your kernel is supported, then tap **Run**.
 
-Support requires an exact `uname -r` match. Check the [supported devices](docs/kernel_profiles/SUPPORTED_DEVICES.md) for your kernel build.
+Support requires an exact `uname -r` match, plus optional bootconfig disambiguation (`androidboot.hardware` / `androidboot.product.device`) when multiple devices share the same kernel version. Check the [supported devices](docs/kernel_profiles/SUPPORTED_DEVICES.md) for your kernel build.
 
 If Shizuku is enabled, start it with ADB before running GhostLock. Tap GhostLock's status card to grant access.
 

@@ -294,6 +294,9 @@ pub struct ConfInputs<'a> {
     pub route_geometry: &'a [(&'static str, i64)],
     pub cred: &'a [(String, String)],
     pub extra_offsets: &'a ConfExtraOffsets,
+    /// Bootconfig parameters from the boot image (androidboot.hardware, androidboot.product.device).
+    pub bootconfig_hardware: Option<&'a str>,
+    pub bootconfig_product_device: Option<&'a str>,
 }
 
 /// Renders a flattened, self-contained GLK profile (`--format conf`): no
@@ -324,6 +327,18 @@ pub fn render_conf(input: &ConfInputs<'_>) -> String {
         Some(offset) => format!("kernel_phys_offset = {offset}"),
         None => "kernel_phys_offset = null".to_string(),
     });
+    // Bootconfig: hardware and product_device from boot image bootconfig section.
+    // Used by the app to disambiguate devices with the same kernel release.
+    if input.bootconfig_hardware.is_some() || input.bootconfig_product_device.is_some() {
+        lines.push("bootconfig {".to_string());
+        if let Some(hw) = input.bootconfig_hardware {
+            lines.push(format!("  hardware = \"{hw}\""));
+        }
+        if let Some(device) = input.bootconfig_product_device {
+            lines.push(format!("  product_device = \"{device}\""));
+        }
+        lines.push("}".to_string());
+    }
     if let Some(route) = input.route {
         // The chosen route keeps its whole field universe even when no
         // geometry could be derived, so the import carries the recommendation
