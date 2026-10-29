@@ -265,7 +265,8 @@ impl BootImage {
         let kernel_size = u32::from_le_bytes(raw[8..12].try_into().unwrap()) as usize;
         let ramdisk_size = u32::from_le_bytes(raw[16..20].try_into().unwrap()) as usize;
         let header_size = u32::from_le_bytes(raw[20..24].try_into().unwrap()) as usize;
-        let page_size = u32::from_le_bytes(raw[36..40].try_into().unwrap()) as usize;
+        // page_size is at offset 32 in ALL boot header versions (v0-v4)
+        let page_size = u32::from_le_bytes(raw[32..36].try_into().unwrap()) as usize;
         let version = u32::from_le_bytes(raw[40..44].try_into().unwrap());
         if !(version == 3 || version == 4) {
             return Err(ExtractError::new(format!(
